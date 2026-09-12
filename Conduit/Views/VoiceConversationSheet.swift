@@ -4,16 +4,71 @@
 //
 
 import SwiftUI
+import WebKit
+
+struct FoundryLiveVoiceConfiguration: Equatable {
+    let url: URL
+    let sessionID: String
+    let profile: String
+
+    static func supports(baseURL: String) -> Bool {
+        guard let components = URLComponents(string: baseURL) else { return false }
+        return components.scheme?.lowercased() == "https" &&
+            components.host?.lowercased() == "hermes-bakeoff.hont.ro"
+    }
+
+    static func make(baseURL: String, sessionID: String, profile: String) -> Self? {
+        guard !sessionID.isEmpty, !profile.isEmpty,
+              var components = URLComponents(string: baseURL),
+              supports(baseURL: baseURL) else { return nil }
+        let basePath = components.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        components.path = "/" + ([basePath, "live-voice"].filter { !$0.isEmpty }.joined(separator: "/")) + "/"
+        components.query = nil
+        components.fragment = nil
+        guard let url = components.url else { return nil }
+        return Self(url: url, sessionID: sessionID, profile: profile)
+    }
+}
+
+private enum VoiceExperience: String, CaseIterable, Identifiable {
+    case foundryLive
+    case hermesPipeline
+
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .foundryLive: return "Foundry Live"
+        case .hermesPipeline: return "Hermes fallback"
+        }
+    }
+}
 
 /// The sheet is deliberately presentation-only. AppState remains responsible
 /// for submitting, interrupting, and rendering the associated Hermes turn.
 struct VoiceConversationSheet: View {
     @ObservedObject var controller: VoiceConversationController
     let profile: String
+    let foundryLiveConfiguration: FoundryLiveVoiceConfiguration?
     let onClose: () -> Void
     var startsListening: Bool = true
 
     @State private var didRequestStart = false
+    @State private var experience: VoiceExperience
+
+    init(
+        controller: VoiceConversationController,
+        profile: String,
+        foundryLiveConfiguration: FoundryLiveVoiceConfiguration? = nil,
+        onClose: @escaping () -> Void,
+        startsListening: Bool = true
+    ) {
+        self.controller = controller
+        self.profile = profile
+        self.foundryLiveConfiguration = foundryLiveConfiguration
+        self.onClose = onClose
+        self.startsListening = startsListening
+        _experience = State(initialValue: foundryLiveConfiguration == nil ? .hermesPipeline : .foundryLive)
+    }
 
     var body: some View {
         NavigationStack {
@@ -21,9 +76,18 @@ struct VoiceConversationSheet: View {
                 ConduitBackdrop()
                 ScrollView {
                     VStack(spacing: 14) {
-                        statusCard
-                        conversationCard
-                        controlsCard
+                        if foundryLiveConfiguration != nil {
+                            experiencePicker
+                        }
+                        if experience == .foundryLive, let configuration = foundryLiveConfiguration {
+                            FoundryLiveVoiceWebView(configuration: configuration)
+                                .frame(minHeight: 520)
+                                .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+                        } else {
+                            statusCard
+                            conversationCard
+                            controlsCard
+                        }
                         Text("Your conversation also continues in chat. Close ends this voice session.")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
@@ -39,11 +103,27 @@ struct VoiceConversationSheet: View {
             }
         }
         .task {
-            guard startsListening, !didRequestStart else { return }
+            guard experience == .hermesPipeline, startsListening, !didRequestStart else { return }
             didRequestStart = true
             await controller.startListening()
         }
+        .onChange(of: experience) { _, selected in
+            controller.stop()
+            guard selected == .hermesPipeline, startsListening else { return }
+            didRequestStart = true
+            Task { await controller.startListening() }
+        }
         .accessibilityElement(children: .contain)
+    }
+
+    private var experiencePicker: some View {
+        Picker("Voice mode", selection: $experience) {
+            ForEach(VoiceExperience.allCases) { mode in
+                Text(mode.title).tag(mode)
+            }
+        }
+        .pickerStyle(.segmented)
+        .accessibilityHint("Foundry Live is direct speech to speech. Hermes fallback uses transcription and speech synthesis.")
     }
 
     private var statusCard: some View {
@@ -267,5 +347,101 @@ private struct VoiceConversationTranscriptBubble: View {
         .frame(maxWidth: .infinity, alignment: isUser ? .trailing : .leading)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(isUser ? "You" : "Hermes"): \(entry.text)")
+    }
+}
+
+private struct FoundryLiveVoiceWebView: UIViewRepresentable {
+    let configuration: FoundryLiveVoiceConfiguration
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(expectedOrigin: configuration.url)
+    }
+
+    func makeUIView(context: Context) -> WKWebView {
+        let webConfiguration = WKWebViewConfiguration()
+        webConfiguration.websiteDataStore = .default()
+        webConfiguration.allowsInlineMediaPlayback = true
+        webConfiguration.mediaTypesRequiringUserActionForPlayback = []
+
+        let payload: [String: Any] = [
+            "embedded": true,
+            "sessionID": configuration.sessionID,
+            "profile": configuration.profile,
+        ]
+        if let data = try? JSONSerialization.data(withJSONObject: payload),
+           let json = String(data: data, encoding: .utf8) {
+            webConfiguration.userContentController.addUserScript(WKUserScript(
+                source: "window.HermesLiveVoiceConfiguration = \(json);",
+                injectionTime: .atDocumentStart,
+                forMainFrameOnly: true
+            ))
+        }
+
+        let webView = WKWebView(frame: .zero, configuration: webConfiguration)
+        webView.navigationDelegate = context.coordinator
+        webView.uiDelegate = context.coordinator
+        webView.allowsLinkPreview = false
+        context.coordinator.webView = webView
+
+        Task { @MainActor in
+            await DashboardCookiePersistence.restore(
+                into: webView.configuration.websiteDataStore.httpCookieStore
+            )
+            webView.load(URLRequest(url: configuration.url))
+        }
+        return webView
+    }
+
+    func updateUIView(_ webView: WKWebView, context: Context) {
+        guard webView.url != configuration.url else { return }
+        context.coordinator.expectedOrigin = configuration.url
+        webView.load(URLRequest(url: configuration.url))
+    }
+
+    static func dismantleUIView(_ webView: WKWebView, coordinator: Coordinator) {
+        webView.evaluateJavaScript("if (typeof stopSession === 'function') { stopSession(); }")
+        webView.stopLoading()
+        webView.navigationDelegate = nil
+        webView.uiDelegate = nil
+    }
+
+    final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
+        weak var webView: WKWebView?
+        var expectedOrigin: URL
+
+        init(expectedOrigin: URL) {
+            self.expectedOrigin = expectedOrigin
+        }
+
+        func webView(
+            _ webView: WKWebView,
+            decidePolicyFor navigationAction: WKNavigationAction,
+            decisionHandler: @escaping (WKNavigationActionPolicy) -> Void
+        ) {
+            guard let url = navigationAction.request.url else {
+                decisionHandler(.cancel)
+                return
+            }
+            if url.scheme == "about" ||
+                (url.scheme?.lowercased() == "https" &&
+                 url.host?.lowercased() == expectedOrigin.host?.lowercased()) {
+                decisionHandler(.allow)
+            } else {
+                decisionHandler(.cancel)
+            }
+        }
+
+        @available(iOS 15.0, *)
+        func webView(
+            _ webView: WKWebView,
+            requestMediaCapturePermissionFor origin: WKSecurityOrigin,
+            initiatedByFrame frame: WKFrameInfo,
+            type: WKMediaCaptureType,
+            decisionHandler: @escaping (WKPermissionDecision) -> Void
+        ) {
+            let trusted = origin.protocol.lowercased() == "https" &&
+                origin.host.lowercased() == expectedOrigin.host?.lowercased()
+            decisionHandler(trusted ? .grant : .deny)
+        }
     }
 }

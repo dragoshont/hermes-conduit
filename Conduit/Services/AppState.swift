@@ -12956,6 +12956,8 @@ final class AppState: ObservableObject {
 
     var voiceUnavailableReason: String? {
         if !isConnected { return "Connect to Hermes before starting voice." }
+        if let baseURL = connection?.baseUrl,
+           FoundryLiveVoiceConfiguration.supports(baseURL: baseURL) { return nil }
         if !isVoiceEnabled { return "Enable voice for this profile in Settings." }
         if voiceTranscriptionMode == .appleOnDevice, !appleSpeechAvailability.canAttemptRecognition {
             switch appleSpeechAvailability {
@@ -12977,6 +12979,16 @@ final class AppState: ObservableObject {
     }
 
     var canStartVoiceConversation: Bool { voiceUnavailableReason == nil }
+
+    var foundryLiveVoiceConfiguration: FoundryLiveVoiceConfiguration? {
+        guard let baseURL = connection?.baseUrl,
+              let sessionID = activeSessionId else { return nil }
+        return FoundryLiveVoiceConfiguration.make(
+            baseURL: baseURL,
+            sessionID: sessionID,
+            profile: activeProfile
+        )
+    }
 
     /// TTS-only availability for read aloud: a connected gateway with voice
     /// enabled and a ready speech provider. Deliberately does not require
@@ -13186,12 +13198,16 @@ final class AppState: ObservableObject {
                 return true
             }
         }
-        guard let sessionID = activeSessionId, let gateway = makeVoiceGateway() else {
+        guard let sessionID = activeSessionId else {
             errorMessage = "Hermes could not prepare a voice conversation."
             return true
         }
-        voiceConversationController.setGateway(gateway)
-        voiceConversationController.beginVoiceTurn(sessionID: sessionID)
+        if let gateway = makeVoiceGateway() {
+            voiceConversationController.setGateway(gateway)
+            voiceConversationController.beginVoiceTurn(sessionID: sessionID)
+        } else {
+            voiceConversationController.stop()
+        }
         showSidebar = false
         showVoiceSheet = true
         return true

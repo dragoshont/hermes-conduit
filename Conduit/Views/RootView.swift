@@ -85,6 +85,7 @@ struct MainView: View {
             VoiceConversationSheet(
                 controller: appState.voiceConversationController,
                 profile: appState.activeProfile,
+                foundryLiveConfiguration: appState.foundryLiveVoiceConfiguration,
                 onClose: appState.closeVoiceConversation
             )
                 .presentationDetents([.large])

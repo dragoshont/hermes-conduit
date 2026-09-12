@@ -3,6 +3,31 @@ import XCTest
 
 @MainActor
 final class VoiceConversationControllerTests: XCTestCase {
+    func testFoundryLiveConfigurationUsesBoundedSameOriginPath() throws {
+        let configuration = try XCTUnwrap(FoundryLiveVoiceConfiguration.make(
+            baseURL: "https://hermes-bakeoff.hont.ro",
+            sessionID: "session-123",
+            profile: "orchestrator"
+        ))
+
+        XCTAssertEqual(configuration.url.absoluteString, "https://hermes-bakeoff.hont.ro/live-voice/")
+        XCTAssertEqual(configuration.sessionID, "session-123")
+        XCTAssertEqual(configuration.profile, "orchestrator")
+    }
+
+    func testFoundryLiveConfigurationRejectsOtherOrInsecureOrigins() {
+        XCTAssertNil(FoundryLiveVoiceConfiguration.make(
+            baseURL: "http://hermes-bakeoff.hont.ro",
+            sessionID: "session-123",
+            profile: "default"
+        ))
+        XCTAssertNil(FoundryLiveVoiceConfiguration.make(
+            baseURL: "https://voice.hont.ro",
+            sessionID: "session-123",
+            profile: "default"
+        ))
+    }
+
     func testFloatMicrophoneSamplesEncodeAsLittleEndianPCM16() {
         let input: [Float] = [-1, -0.5, 0, 0.5, 1, .nan]
         let encoded = input.withUnsafeBufferPointer { buffer in
