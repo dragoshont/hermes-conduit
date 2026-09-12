@@ -28,6 +28,22 @@ final class VoiceConversationControllerTests: XCTestCase {
         ))
     }
 
+    func testFoundryLiveOriginMatchingIncludesEffectivePort() throws {
+        let trusted = try XCTUnwrap(URL(string: "https://hermes-bakeoff.hont.ro/live-voice/"))
+        XCTAssertTrue(FoundryLiveVoiceConfiguration.matchesOrigin(
+            scheme: "https",
+            host: "hermes-bakeoff.hont.ro",
+            port: 443,
+            trustedURL: trusted
+        ))
+        XCTAssertFalse(FoundryLiveVoiceConfiguration.matchesOrigin(
+            scheme: "https",
+            host: "hermes-bakeoff.hont.ro",
+            port: 8443,
+            trustedURL: trusted
+        ))
+    }
+
     func testFloatMicrophoneSamplesEncodeAsLittleEndianPCM16() {
         let input: [Float] = [-1, -0.5, 0, 0.5, 1, .nan]
         let encoded = input.withUnsafeBufferPointer { buffer in

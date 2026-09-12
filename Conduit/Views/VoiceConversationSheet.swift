@@ -17,6 +17,23 @@ struct FoundryLiveVoiceConfiguration: Equatable {
             components.host?.lowercased() == "hermes-bakeoff.hont.ro"
     }
 
+    static func matchesOrigin(
+        scheme: String?,
+        host: String?,
+        port: Int?,
+        trustedURL: URL
+    ) -> Bool {
+        let normalizedScheme = scheme?.lowercased()
+        let trustedScheme = trustedURL.scheme?.lowercased()
+        let normalizedHost = host?.lowercased()
+        let trustedHost = trustedURL.host?.lowercased()
+        let normalizedPort = port ?? (normalizedScheme == "https" ? 443 : 80)
+        let trustedPort = trustedURL.port ?? (trustedScheme == "https" ? 443 : 80)
+        return normalizedScheme == trustedScheme &&
+            normalizedHost == trustedHost &&
+            normalizedPort == trustedPort
+    }
+
     static func make(baseURL: String, sessionID: String, profile: String) -> Self? {
         guard !sessionID.isEmpty, !profile.isEmpty,
               var components = URLComponents(string: baseURL),
@@ -422,9 +439,12 @@ private struct FoundryLiveVoiceWebView: UIViewRepresentable {
                 decisionHandler(.cancel)
                 return
             }
-            if url.scheme == "about" ||
-                (url.scheme?.lowercased() == "https" &&
-                 url.host?.lowercased() == expectedOrigin.host?.lowercased()) {
+            if url.scheme == "about" || FoundryLiveVoiceConfiguration.matchesOrigin(
+                scheme: url.scheme,
+                host: url.host,
+                port: url.port,
+                trustedURL: expectedOrigin
+            ) {
                 decisionHandler(.allow)
             } else {
                 decisionHandler(.cancel)
@@ -439,8 +459,12 @@ private struct FoundryLiveVoiceWebView: UIViewRepresentable {
             type: WKMediaCaptureType,
             decisionHandler: @escaping (WKPermissionDecision) -> Void
         ) {
-            let trusted = origin.protocol.lowercased() == "https" &&
-                origin.host.lowercased() == expectedOrigin.host?.lowercased()
+            let trusted = FoundryLiveVoiceConfiguration.matchesOrigin(
+                scheme: origin.protocol,
+                host: origin.host,
+                port: origin.port,
+                trustedURL: expectedOrigin
+            )
             decisionHandler(trusted ? .grant : .deny)
         }
     }
