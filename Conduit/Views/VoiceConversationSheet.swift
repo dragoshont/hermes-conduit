@@ -14,7 +14,10 @@ struct FoundryLiveVoiceConfiguration: Equatable {
     static func supports(baseURL: String) -> Bool {
         guard let components = URLComponents(string: baseURL) else { return false }
         return components.scheme?.lowercased() == "https" &&
-            components.host?.lowercased() == "hermes-bakeoff.hont.ro"
+            components.host?.lowercased() == "hermes-bakeoff.hont.ro" &&
+            (components.port == nil || components.port == 443) &&
+            components.user == nil &&
+            components.password == nil
     }
 
     static func matchesOrigin(
@@ -105,7 +108,9 @@ struct VoiceConversationSheet: View {
                             conversationCard
                             controlsCard
                         }
-                        Text("Your conversation also continues in chat. Close ends this voice session.")
+                        Text(experience == .foundryLive
+                            ? "A transcript artifact is linked to this Hermes session. Close ends Live Voice."
+                            : "Your conversation also continues in chat. Close ends this voice session.")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                             .multilineTextAlignment(.center)

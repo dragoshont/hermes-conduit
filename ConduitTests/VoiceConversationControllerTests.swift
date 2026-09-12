@@ -26,6 +26,16 @@ final class VoiceConversationControllerTests: XCTestCase {
             sessionID: "session-123",
             profile: "default"
         ))
+        XCTAssertNil(FoundryLiveVoiceConfiguration.make(
+            baseURL: "https://hermes-bakeoff.hont.ro:8443",
+            sessionID: "session-123",
+            profile: "default"
+        ))
+        XCTAssertNil(FoundryLiveVoiceConfiguration.make(
+            baseURL: "https://user@example.com@hermes-bakeoff.hont.ro",
+            sessionID: "session-123",
+            profile: "default"
+        ))
     }
 
     func testFoundryLiveOriginMatchingIncludesEffectivePort() throws {
