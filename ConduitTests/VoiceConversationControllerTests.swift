@@ -3,6 +3,12 @@ import XCTest
 
 @MainActor
 final class VoiceConversationControllerTests: XCTestCase {
+    private struct LiveWorkCredentials: Decodable {
+        let baseURL: String
+        let username: String
+        let password: String
+    }
+
     func testFoundryLiveConfigurationUsesBoundedSameOriginPath() throws {
         let configuration = try XCTUnwrap(FoundryLiveVoiceConfiguration.make(
             baseURL: "https://hermes-bakeoff.hont.ro",
@@ -52,6 +58,144 @@ final class VoiceConversationControllerTests: XCTestCase {
             port: 8443,
             trustedURL: trusted
         ))
+    }
+
+    func testLiveWorkJourneySurvivesHermesPodReplacement() async throws {
+        let brokerURL = try XCTUnwrap(URL(string: "http://127.0.0.1:8765/credentials"))
+        let credentials: LiveWorkCredentials
+        do {
+            let (data, response) = try await URLSession.shared.data(from: brokerURL)
+            guard (response as? HTTPURLResponse)?.statusCode == 200 else {
+                throw XCTSkip("Live Work credential broker is not active")
+            }
+            credentials = try JSONDecoder().decode(LiveWorkCredentials.self, from: data)
+        } catch {
+            throw XCTSkip("Live Work credential broker is not active")
+        }
+        XCTAssertEqual(credentials.baseURL, "https://hermes-bakeoff.hont.ro")
+
+        let auth = NativeAuthClient(baseURL: credentials.baseURL)
+        let authenticated = try await auth.connect(
+            username: credentials.username,
+            password: credentials.password
+        )
+        authenticated.commitCookies()
+        let marker = "CONDUIT_WORK_\(UUID().uuidString.replacingOccurrences(of: "-", with: ""))"
+        let client = HermesClient(
+            connection: HermesConnection(baseUrl: credentials.baseURL, ticket: authenticated.ticket),
+            profile: "default"
+        )
+        try await client.connect()
+        let created = try await client.createSession()
+        let completed = expectation(description: "tool-backed Hermes turn completed")
+        var completedContent = ""
+        var storedSessionID = created.storedSessionId
+        client.onEvent = { event in
+            switch event {
+            case .messageComplete(let sessionID, _, let content, _):
+                guard sessionID == created.sessionId else { return }
+                completedContent = content ?? ""
+                completed.fulfill()
+            case .sessionTitle(let runtimeID, let storedID, _):
+                if runtimeID == created.sessionId { storedSessionID = storedID }
+            default:
+                break
+            }
+        }
+        let submission = try await client.sendPrompt(
+            created.sessionId,
+            text: "Reply with exactly \(marker) and no other text."
+        )
+        XCTAssertEqual(submission, .accepted)
+        await fulfillment(of: [completed], timeout: 180)
+        XCTAssertTrue(completedContent.contains(marker))
+        let canonicalSessionID = try XCTUnwrap(storedSessionID)
+
+        let bridge = DashboardTicketBridge(baseURL: credentials.baseURL)
+        let kanban = KanbanService(requester: bridge)
+        let artifactMarker = "CONDUIT_DURABLE_\(UUID().uuidString.replacingOccurrences(of: "-", with: ""))"
+        let taskResponse = try await kanban.createTask(
+            KanbanCreateTaskRequest(
+                title: "Conduit integrated restart canary",
+                body: "Create conduit-work-proof.md containing exactly \(artifactMarker) followed by one newline. Verify exact bytes, then call kanban_complete with the file attached and structured verification metadata. Do not use the network or modify anything else.",
+                assignee: "builder",
+                workspaceKind: "scratch",
+                idempotencyKey: "conduit-integrated-\(artifactMarker)",
+                maxRuntimeSeconds: 300
+            ),
+            board: nil
+        )
+        let taskID = try XCTUnwrap(taskResponse.task?.id)
+        let completedTask = try await waitForTask(taskID, service: kanban)
+        XCTAssertEqual(completedTask.task.status, "done")
+        XCTAssertTrue(completedTask.attachments.contains { $0.filename == "conduit-work-proof.md" })
+
+        bridge.invalidate()
+        client.disconnect()
+        let restartURL = try XCTUnwrap(URL(string: "http://127.0.0.1:8765/restart"))
+        var restartRequest = URLRequest(url: restartURL)
+        restartRequest.timeoutInterval = 360
+        let (_, restartResponse) = try await URLSession.shared.data(for: restartRequest)
+        XCTAssertEqual((restartResponse as? HTTPURLResponse)?.statusCode, 204)
+
+        let recoveredAuth = try await auth.connect(
+            username: credentials.username,
+            password: credentials.password
+        )
+        recoveredAuth.commitCookies()
+        let recoveredClient = HermesClient(
+            connection: HermesConnection(baseUrl: credentials.baseURL, ticket: recoveredAuth.ticket),
+            profile: "default"
+        )
+        try await recoveredClient.connect()
+        defer { recoveredClient.disconnect() }
+        let resumed = try await recoveredClient.openSession(canonicalSessionID)
+        XCTAssertEqual(resumed.storedSessionId, canonicalSessionID)
+        let transcript = try await liveJSON(
+            baseURL: credentials.baseURL,
+            path: "/api/sessions/\(canonicalSessionID)/messages?limit=120&offset=0&order=latest&include_compacted=true&profile=default"
+        )
+        XCTAssertTrue(String(describing: transcript).contains(marker))
+        let recoveredTask = try await liveJSON(
+            baseURL: credentials.baseURL,
+            path: "/api/plugins/kanban/tasks/\(taskID)"
+        )
+        XCTAssertEqual((recoveredTask["task"] as? [String: Any])?["status"] as? String, "done")
+        let attachments = recoveredTask["attachments"] as? [[String: Any]] ?? []
+        XCTAssertTrue(attachments.contains { $0["filename"] as? String == "conduit-work-proof.md" })
+        print(
+            "LIVE_WORK session=\(canonicalSessionID) task=\(taskID) "
+                + "kanban_tool=true restart=true session_resume=true "
+                + "artifact=true no_duplicate_session=true"
+        )
+    }
+
+    private func waitForTask(
+        _ taskID: String,
+        service: KanbanService
+    ) async throws -> KanbanTaskDetail {
+        let deadline = Date().addingTimeInterval(300)
+        while Date() < deadline {
+            let detail = try await service.fetchTask(id: taskID, board: nil)
+            if detail.task.status == "done" { return detail }
+            if detail.task.status == "blocked" {
+                XCTFail("Integrated Conduit task blocked: \(detail.task.lastFailureError ?? "unknown")")
+                return detail
+            }
+            try await Task.sleep(for: .seconds(2))
+        }
+        XCTFail("Integrated Conduit task did not complete before timeout")
+        return try await service.fetchTask(id: taskID, board: nil)
+    }
+
+    private func liveJSON(baseURL: String, path: String) async throws -> [String: Any] {
+        let url = try XCTUnwrap(URL(string: baseURL + path))
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 20
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        let (data, response) = try await URLSession.shared.data(for: request)
+        XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 200)
+        return try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
     }
 
     func testFloatMicrophoneSamplesEncodeAsLittleEndianPCM16() {
