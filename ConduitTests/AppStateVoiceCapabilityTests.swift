@@ -100,6 +100,45 @@ final class AppStateVoiceCapabilityTests: XCTestCase {
         XCTAssertTrue(appState.canStartVoiceConversation)
     }
 
+    func testFoundryLiveVoiceRequiresAndUsesDurableSessionID() {
+        let appState = makeAppState(
+            snapshot: VoiceCapabilitySnapshot(
+                isGatewayConnected: true,
+                supportsTranscription: true,
+                supportsSpeech: true,
+                unavailableReason: nil
+            )
+        )
+        appState.connection = HermesConnection(
+            baseUrl: "https://hermes-bakeoff.hont.ro",
+            ticket: "test-ticket"
+        )
+        appState.activeSessionId = "runtime-session"
+
+        XCTAssertNil(appState.foundryLiveVoiceConfiguration)
+
+        appState.sessions = [
+            SessionSummary(
+                id: "stored-session",
+                storedSessionId: "stored-session",
+                alternateIds: ["runtime-session"],
+                title: "Durable conversation",
+                model: "Hermes",
+                updatedLabel: "now",
+                profile: appState.activeProfile,
+                source: .chat,
+                isActive: true,
+                isArchived: false,
+                lineageRootId: nil
+            )
+        ]
+
+        XCTAssertEqual(
+            appState.foundryLiveVoiceConfiguration?.sessionID,
+            "stored-session"
+        )
+    }
+
     private func makeAppState(
         snapshot: VoiceCapabilitySnapshot,
         transcriptionMode: VoiceTranscriptionMode = .hermes,

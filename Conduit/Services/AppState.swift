@@ -4686,6 +4686,35 @@ final class AppState: ObservableObject {
         )
     }
 
+    private func durableCanonicalSessionID(for sessionID: String?) -> String? {
+        guard let sessionID = ChatScrollIdentityNormalization.sessionID(sessionID) else {
+            return nil
+        }
+
+        let catalogSession = (sessions + cronSessions).first { session in
+            let belongsToActiveProfile = session.profile.map {
+                profilesMatch($0, activeProfile)
+            } ?? true
+            return belongsToActiveProfile &&
+                (session.id == sessionID || session.alternateIds.contains(sessionID))
+        }
+        if let durableID = catalogSession.flatMap({
+            ChatScrollIdentityNormalization.sessionID($0.id)
+        }) {
+            return durableID
+        }
+
+        guard activeChatScrollSessionIdentity.contains(sessionID) else {
+            return nil
+        }
+        guard let durableID = ChatScrollIdentityNormalization.sessionID(
+            activeChatScrollSessionIdentity.canonicalSessionID
+        ), durableID != sessionID else {
+            return nil
+        }
+        return durableID
+    }
+
     /// Derives bookkeeping keys for an explicit profile. Callers must pass
     /// the profile that owns the state being tracked; nothing here consults
     /// mutable activeProfile.
@@ -12982,7 +13011,9 @@ final class AppState: ObservableObject {
 
     var foundryLiveVoiceConfiguration: FoundryLiveVoiceConfiguration? {
         guard let baseURL = connection?.baseUrl,
-              let sessionID = activeSessionId else { return nil }
+              let sessionID = durableCanonicalSessionID(for: activeSessionId) else {
+            return nil
+        }
         return FoundryLiveVoiceConfiguration.make(
             baseURL: baseURL,
             sessionID: sessionID,
