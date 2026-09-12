@@ -9,6 +9,41 @@ final class VoiceConversationControllerTests: XCTestCase {
         let password: String
     }
 
+    private final class LiveDashboardRequester: DashboardJSONRequester {
+        let baseURL: String
+
+        init(baseURL: String) {
+            self.baseURL = baseURL
+        }
+
+        func requestJSON(
+            path: String,
+            method: String,
+            body: [String: Any]?,
+            timeoutMilliseconds: Int,
+            maxResponseBytes: Int
+        ) async throws -> [String: Any] {
+            let url = try XCTUnwrap(URL(string: baseURL + path))
+            var request = URLRequest(url: url)
+            request.httpMethod = method
+            request.timeoutInterval = Double(timeoutMilliseconds) / 1_000
+            request.setValue("application/json", forHTTPHeaderField: "Accept")
+            if let body {
+                request.httpBody = try JSONSerialization.data(withJSONObject: body)
+                request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            }
+            let (data, response) = try await URLSession.shared.data(for: request)
+            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+            guard (200...299).contains(status) else {
+                throw DashboardTicketBridgeError.http(status: status, detail: "Live request failed")
+            }
+            guard data.count <= maxResponseBytes else {
+                throw DashboardTicketBridgeError.oversizedResponse(limit: maxResponseBytes)
+            }
+            return try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        }
+    }
+
     func testFoundryLiveConfigurationUsesBoundedSameOriginPath() throws {
         let configuration = try XCTUnwrap(FoundryLiveVoiceConfiguration.make(
             baseURL: "https://hermes-bakeoff.hont.ro",
@@ -110,9 +145,15 @@ final class VoiceConversationControllerTests: XCTestCase {
         await fulfillment(of: [completed], timeout: 180)
         XCTAssertTrue(completedContent.contains(marker))
         let canonicalSessionID = try XCTUnwrap(storedSessionID)
+        let sessionCatalogPath = "/api/profiles/sessions?limit=200&offset=0&min_messages=1&archived=exclude&order=recent&exclude_sources=cron"
+        let catalogBefore = try await liveJSON(
+            baseURL: credentials.baseURL,
+            path: sessionCatalogPath
+        )
+        let desktopSessionsBefore = desktopSessionIDs(in: catalogBefore)
+        XCTAssertEqual(desktopSessionsBefore.filter { $0 == canonicalSessionID }.count, 1)
 
-        let bridge = DashboardTicketBridge(baseURL: credentials.baseURL)
-        let kanban = KanbanService(requester: bridge)
+        let kanban = KanbanService(requester: LiveDashboardRequester(baseURL: credentials.baseURL))
         let artifactMarker = "CONDUIT_DURABLE_\(UUID().uuidString.replacingOccurrences(of: "-", with: ""))"
         let taskResponse = try await kanban.createTask(
             KanbanCreateTaskRequest(
@@ -130,7 +171,6 @@ final class VoiceConversationControllerTests: XCTestCase {
         XCTAssertEqual(completedTask.task.status, "done")
         XCTAssertTrue(completedTask.attachments.contains { $0.filename == "conduit-work-proof.md" })
 
-        bridge.invalidate()
         client.disconnect()
         let restartURL = try XCTUnwrap(URL(string: "http://127.0.0.1:8765/restart"))
         var restartRequest = URLRequest(url: restartURL)
@@ -156,6 +196,13 @@ final class VoiceConversationControllerTests: XCTestCase {
             path: "/api/sessions/\(canonicalSessionID)/messages?limit=120&offset=0&order=latest&include_compacted=true&profile=default"
         )
         XCTAssertTrue(String(describing: transcript).contains(marker))
+        let catalogAfter = try await liveJSON(
+            baseURL: credentials.baseURL,
+            path: sessionCatalogPath
+        )
+        let desktopSessionsAfter = desktopSessionIDs(in: catalogAfter)
+        XCTAssertEqual(desktopSessionsAfter.filter { $0 == canonicalSessionID }.count, 1)
+        XCTAssertEqual(desktopSessionsAfter, desktopSessionsBefore)
         let recoveredTask = try await liveJSON(
             baseURL: credentials.baseURL,
             path: "/api/plugins/kanban/tasks/\(taskID)"
@@ -196,6 +243,14 @@ final class VoiceConversationControllerTests: XCTestCase {
         let (data, response) = try await URLSession.shared.data(for: request)
         XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 200)
         return try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+    }
+
+    private func desktopSessionIDs(in payload: [String: Any]) -> [String] {
+        let sessions = payload["sessions"] as? [[String: Any]] ?? []
+        return sessions.compactMap { session in
+            guard session["source"] as? String == "desktop" else { return nil }
+            return session["id"] as? String
+        }.sorted()
     }
 
     func testFloatMicrophoneSamplesEncodeAsLittleEndianPCM16() {
