@@ -4102,6 +4102,7 @@ final class AppState: ObservableObject {
             }
             let summary = SessionSummary(
                 id: storedID,
+                storedSessionId: created.storedSessionId,
                 alternateIds: [runtimeSessionID, created.storedSessionId]
                     .compactMap { $0 }
                     .filter { $0 != storedID },
@@ -7272,6 +7273,7 @@ final class AppState: ObservableObject {
 
             let summary = SessionSummary(
                 id: branched.storedSessionId ?? branched.sessionId,
+                storedSessionId: branched.storedSessionId,
                 alternateIds: [branched.sessionId, branched.storedSessionId]
                     .compactMap { $0 }
                     .filter { $0 != branched.storedSessionId ?? branched.sessionId },

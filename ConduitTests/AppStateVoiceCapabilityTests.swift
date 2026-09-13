@@ -136,6 +136,28 @@ final class AppStateVoiceCapabilityTests: XCTestCase {
             appState.foundryLiveVoiceConfiguration?.sessionID,
             "stored-session"
         )
+
+        appState.sessions = MessageNormalizer.normalizeSessions(
+            .object([
+                "sessions": .array([
+                    .object([
+                        "session_id": .string("runtime-session"),
+                        "id": .string("stale-stored-session"),
+                        "profile": .string(appState.activeProfile),
+                    ]),
+                    .object([
+                        "session_id": .string("runtime-session"),
+                        "id": .string("stored-session"),
+                        "profile": .string(appState.activeProfile),
+                    ])
+                ])
+            ]),
+            profile: appState.activeProfile
+        )
+
+        XCTAssertNil(appState.foundryLiveVoiceConfiguration)
+        appState.sessions.reverse()
+        XCTAssertNil(appState.foundryLiveVoiceConfiguration)
     }
 
     private func makeAppState(

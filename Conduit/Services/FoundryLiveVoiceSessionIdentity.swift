@@ -18,25 +18,31 @@ enum FoundryLiveVoiceSessionIdentity {
         guard let activeSessionID = normalized(activeSessionID) else { return nil }
         let normalizedProfile = normalized(activeProfile) ?? ""
 
-        if let catalogSession = catalog.first(where: { session in
+        let matchingStoredIDs = Set(catalog.compactMap { session -> String? in
             let belongsToActiveProfile = session.profile
                 .flatMap(normalized)
                 .map { $0.caseInsensitiveCompare(normalizedProfile) == .orderedSame }
                 ?? true
-            return belongsToActiveProfile &&
-                (normalized(session.id) == activeSessionID ||
-                    session.alternateIDs.compactMap(normalized).contains(activeSessionID))
-        }) {
-            return normalized(catalogSession.storedSessionID)
-        }
+            guard belongsToActiveProfile,
+                  normalized(session.id) == activeSessionID ||
+                    session.alternateIDs.compactMap(normalized).contains(activeSessionID) else {
+                return nil
+            }
+            return normalized(session.storedSessionID)
+        })
 
         let equivalents = Set(identityEquivalentIDs.compactMap(normalized))
-        guard equivalents.contains(activeSessionID),
-              let durableID = normalized(identityCanonicalID),
-              durableID != activeSessionID else {
-            return nil
+        let establishedIdentity = equivalents.contains(activeSessionID)
+            ? normalized(identityCanonicalID)
+            : nil
+        if let establishedIdentity, establishedIdentity != activeSessionID {
+            guard matchingStoredIDs.isEmpty || matchingStoredIDs == [establishedIdentity] else {
+                return nil
+            }
+            return establishedIdentity
         }
-        return durableID
+        guard matchingStoredIDs.count == 1 else { return nil }
+        return matchingStoredIDs.first
     }
 
     private static func normalized(_ value: String?) -> String? {
