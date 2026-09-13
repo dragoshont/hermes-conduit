@@ -117,21 +117,20 @@ final class AppStateVoiceCapabilityTests: XCTestCase {
 
         XCTAssertNil(appState.foundryLiveVoiceConfiguration)
 
-        appState.sessions = [
-            SessionSummary(
-                id: "stored-session",
-                storedSessionId: "stored-session",
-                alternateIds: ["runtime-session"],
-                title: "Durable conversation",
-                model: "Hermes",
-                updatedLabel: "now",
-                profile: appState.activeProfile,
-                source: .chat,
-                isActive: true,
-                isArchived: false,
-                lineageRootId: nil
-            )
-        ]
+        appState.sessions = MessageNormalizer.normalizeSessions(
+            .object([
+                "sessions": .array([
+                    .object([
+                        "session_id": .string("runtime-session"),
+                        "id": .string("stored-session"),
+                        "profile": .string(appState.activeProfile),
+                    ])
+                ])
+            ]),
+            profile: appState.activeProfile
+        )
+        XCTAssertEqual(appState.sessions.first?.id, "runtime-session")
+        XCTAssertEqual(appState.sessions.first?.storedSessionId, "stored-session")
 
         XCTAssertEqual(
             appState.foundryLiveVoiceConfiguration?.sessionID,

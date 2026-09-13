@@ -12988,6 +12988,7 @@ final class AppState: ObservableObject {
                 catalog: (sessions + cronSessions).map {
                     FoundryLiveVoiceSessionIdentity.CatalogEntry(
                         id: $0.id,
+                        storedSessionID: $0.storedSessionId,
                         alternateIDs: $0.alternateIds,
                         profile: $0.profile
                     )

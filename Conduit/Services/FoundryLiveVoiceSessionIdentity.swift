@@ -3,6 +3,7 @@ import Foundation
 enum FoundryLiveVoiceSessionIdentity {
     struct CatalogEntry: Equatable {
         let id: String
+        let storedSessionID: String?
         let alternateIDs: [String]
         let profile: String?
     }
@@ -26,7 +27,7 @@ enum FoundryLiveVoiceSessionIdentity {
                 (normalized(session.id) == activeSessionID ||
                     session.alternateIDs.compactMap(normalized).contains(activeSessionID))
         }) {
-            return normalized(catalogSession.id)
+            return normalized(catalogSession.storedSessionID)
         }
 
         let equivalents = Set(identityEquivalentIDs.compactMap(normalized))
