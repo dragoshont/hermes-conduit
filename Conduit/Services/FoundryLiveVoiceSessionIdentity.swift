@@ -23,12 +23,14 @@ enum FoundryLiveVoiceSessionIdentity {
                 .flatMap(normalized)
                 .map { $0.caseInsensitiveCompare(normalizedProfile) == .orderedSame }
                 ?? true
+            let catalogID = normalized(session.id)
             guard belongsToActiveProfile,
-                  normalized(session.id) == activeSessionID ||
+                  catalogID == activeSessionID ||
                     session.alternateIDs.compactMap(normalized).contains(activeSessionID) else {
                 return nil
             }
             return normalized(session.storedSessionID)
+                ?? (catalogID == activeSessionID ? catalogID : nil)
         })
 
         let equivalents = Set(identityEquivalentIDs.compactMap(normalized))

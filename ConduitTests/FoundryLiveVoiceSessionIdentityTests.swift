@@ -34,6 +34,26 @@ final class FoundryLiveVoiceSessionIdentityTests: XCTestCase {
         )
     }
 
+    func testCatalogOnlyIDIsAcceptedAsDurable() {
+        let entry = FoundryLiveVoiceSessionIdentity.CatalogEntry(
+            id: "stored-session",
+            storedSessionID: nil,
+            alternateIDs: [],
+            profile: "default"
+        )
+
+        XCTAssertEqual(
+            FoundryLiveVoiceSessionIdentity.canonicalID(
+                activeSessionID: "stored-session",
+                activeProfile: "default",
+                catalog: [entry],
+                identityCanonicalID: nil,
+                identityEquivalentIDs: []
+            ),
+            "stored-session"
+        )
+    }
+
     func testConflictingStoredIDsFailClosedRegardlessOfRowOrder() {
         let first = entry(storedID: "stored-a", alternateID: "stored-b")
         let second = entry(storedID: "stored-b", alternateID: "stored-a")
@@ -101,6 +121,41 @@ final class AppStateFoundryLiveVoiceConfigurationTests: XCTestCase {
                 appState.foundryLiveVoiceConfiguration?.sessionID,
                 "stored-session"
             )
+        }
+
+        func testConfigurationUsesExactCatalogIDWhenNoAliasExists() {
+            MainActor.assumeIsolated {
+                let suite = "AppStateFoundryLiveVoiceConfigurationTests.\(UUID().uuidString)"
+                guard let defaults = UserDefaults(suiteName: suite) else {
+                    XCTFail("Failed to create test UserDefaults suite")
+                    return
+                }
+                defer { defaults.removePersistentDomain(forName: suite) }
+
+                let appState = AppState(defaults: defaults, loadSavedConnection: false)
+                appState.connection = HermesConnection(
+                    baseUrl: "https://hermes-bakeoff.hont.ro",
+                    ticket: "test-ticket"
+                )
+                appState.activeSessionId = "stored-session"
+                appState.sessions = MessageNormalizer.normalizeSessions(
+                    .object([
+                        "sessions": .array([
+                            .object([
+                                "id": .string("stored-session"),
+                                "profile": .string(appState.activeProfile),
+                            ])
+                        ])
+                    ]),
+                    profile: appState.activeProfile
+                )
+
+                XCTAssertNil(appState.sessions.first?.storedSessionId)
+                XCTAssertEqual(
+                    appState.foundryLiveVoiceConfiguration?.sessionID,
+                    "stored-session"
+                )
+            }
         }
     }
 }
