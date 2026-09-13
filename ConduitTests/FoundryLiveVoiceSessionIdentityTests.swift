@@ -122,40 +122,40 @@ final class AppStateFoundryLiveVoiceConfigurationTests: XCTestCase {
                 "stored-session"
             )
         }
+    }
 
-        func testConfigurationUsesExactCatalogIDWhenNoAliasExists() {
-            MainActor.assumeIsolated {
-                let suite = "AppStateFoundryLiveVoiceConfigurationTests.\(UUID().uuidString)"
-                guard let defaults = UserDefaults(suiteName: suite) else {
-                    XCTFail("Failed to create test UserDefaults suite")
-                    return
-                }
-                defer { defaults.removePersistentDomain(forName: suite) }
-
-                let appState = AppState(defaults: defaults, loadSavedConnection: false)
-                appState.connection = HermesConnection(
-                    baseUrl: "https://hermes-bakeoff.hont.ro",
-                    ticket: "test-ticket"
-                )
-                appState.activeSessionId = "stored-session"
-                appState.sessions = MessageNormalizer.normalizeSessions(
-                    .object([
-                        "sessions": .array([
-                            .object([
-                                "id": .string("stored-session"),
-                                "profile": .string(appState.activeProfile),
-                            ])
-                        ])
-                    ]),
-                    profile: appState.activeProfile
-                )
-
-                XCTAssertNil(appState.sessions.first?.storedSessionId)
-                XCTAssertEqual(
-                    appState.foundryLiveVoiceConfiguration?.sessionID,
-                    "stored-session"
-                )
+    func testConfigurationUsesExactCatalogIDWhenNoAliasExists() {
+        MainActor.assumeIsolated {
+            let suite = "AppStateFoundryLiveVoiceConfigurationTests.\(UUID().uuidString)"
+            guard let defaults = UserDefaults(suiteName: suite) else {
+                XCTFail("Failed to create test UserDefaults suite")
+                return
             }
+            defer { defaults.removePersistentDomain(forName: suite) }
+
+            let appState = AppState(defaults: defaults, loadSavedConnection: false)
+            appState.connection = HermesConnection(
+                baseUrl: "https://hermes-bakeoff.hont.ro",
+                ticket: "test-ticket"
+            )
+            appState.activeSessionId = "stored-session"
+            appState.sessions = MessageNormalizer.normalizeSessions(
+                .object([
+                    "sessions": .array([
+                        .object([
+                            "id": .string("stored-session"),
+                            "profile": .string(appState.activeProfile),
+                        ])
+                    ])
+                ]),
+                profile: appState.activeProfile
+            )
+
+            XCTAssertNil(appState.sessions.first?.storedSessionId)
+            XCTAssertEqual(
+                appState.foundryLiveVoiceConfiguration?.sessionID,
+                "stored-session"
+            )
         }
     }
 }
