@@ -63,3 +63,44 @@ final class FoundryLiveVoiceSessionIdentityTests: XCTestCase {
         )
     }
 }
+
+final class AppStateFoundryLiveVoiceConfigurationTests: XCTestCase {
+    func testConfigurationUsesStoredIDFromProductionPayload() {
+        MainActor.assumeIsolated {
+            let suite = "AppStateFoundryLiveVoiceConfigurationTests.\(UUID().uuidString)"
+            guard let defaults = UserDefaults(suiteName: suite) else {
+                XCTFail("Failed to create test UserDefaults suite")
+                return
+            }
+            defer { defaults.removePersistentDomain(forName: suite) }
+
+            let appState = AppState(defaults: defaults, loadSavedConnection: false)
+            appState.connection = HermesConnection(
+                baseUrl: "https://hermes-bakeoff.hont.ro",
+                ticket: "test-ticket"
+            )
+            appState.activeSessionId = "runtime-session"
+            XCTAssertNil(appState.foundryLiveVoiceConfiguration)
+
+            appState.sessions = MessageNormalizer.normalizeSessions(
+                .object([
+                    "sessions": .array([
+                        .object([
+                            "session_id": .string("runtime-session"),
+                            "id": .string("stored-session"),
+                            "profile": .string(appState.activeProfile),
+                        ])
+                    ])
+                ]),
+                profile: appState.activeProfile
+            )
+
+            XCTAssertEqual(appState.sessions.first?.id, "runtime-session")
+            XCTAssertEqual(appState.sessions.first?.storedSessionId, "stored-session")
+            XCTAssertEqual(
+                appState.foundryLiveVoiceConfiguration?.sessionID,
+                "stored-session"
+            )
+        }
+    }
+}
