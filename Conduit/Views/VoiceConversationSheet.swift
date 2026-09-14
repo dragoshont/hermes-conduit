@@ -37,6 +37,20 @@ struct FoundryLiveVoiceConfiguration: Equatable {
             normalizedPort == trustedPort
     }
 
+    static func matchesSecurityOrigin(
+        scheme: String?,
+        host: String?,
+        port: Int,
+        trustedURL: URL
+    ) -> Bool {
+        matchesOrigin(
+            scheme: scheme,
+            host: host,
+            port: port == 0 ? nil : port,
+            trustedURL: trustedURL
+        )
+    }
+
     static func make(baseURL: String, sessionID: String, profile: String) -> Self? {
         guard !sessionID.isEmpty, !profile.isEmpty,
               var components = URLComponents(string: baseURL),
@@ -464,7 +478,7 @@ private struct FoundryLiveVoiceWebView: UIViewRepresentable {
             type: WKMediaCaptureType,
             decisionHandler: @escaping (WKPermissionDecision) -> Void
         ) {
-            let trusted = FoundryLiveVoiceConfiguration.matchesOrigin(
+            let trusted = FoundryLiveVoiceConfiguration.matchesSecurityOrigin(
                 scheme: origin.protocol,
                 host: origin.host,
                 port: origin.port,

@@ -95,6 +95,22 @@ final class VoiceConversationControllerTests: XCTestCase {
         ))
     }
 
+    func testFoundryLiveSecurityOriginTreatsZeroAsDefaultPort() throws {
+        let trusted = try XCTUnwrap(URL(string: "https://hermes-bakeoff.hont.ro/live-voice/"))
+        XCTAssertTrue(FoundryLiveVoiceConfiguration.matchesSecurityOrigin(
+            scheme: "https",
+            host: "hermes-bakeoff.hont.ro",
+            port: 0,
+            trustedURL: trusted
+        ))
+        XCTAssertFalse(FoundryLiveVoiceConfiguration.matchesSecurityOrigin(
+            scheme: "https",
+            host: "hermes-bakeoff.hont.ro",
+            port: 8443,
+            trustedURL: trusted
+        ))
+    }
+
     func testLiveWorkJourneySurvivesHermesPodReplacement() async throws {
         let brokerURL = try XCTUnwrap(URL(string: "http://127.0.0.1:8765/credentials"))
         let credentials: LiveWorkCredentials
